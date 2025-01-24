@@ -8,3 +8,7 @@ This is a Streamlit app that connects to a Snowflake database and validates sche
    ```bash
    git clone https://github.com/your-username/schema-validation-app.git
    cd schema-validation-app
+   pip install -r requirements.txt
+2. Run the streamlit app
+   streamlit run app.py
+
