@@ -13,6 +13,7 @@ def connect_snowflake(config):
         database=config['database'],
         schema=config['schema']
     )
+    st.success("Snowflake connection successfull")
     return conn
 
 # Function to fetch Snowflake table metadata
@@ -20,25 +21,26 @@ def get_snowflake_metadata(conn, table_name):
     cursor = conn.cursor()
     cursor.execute(f"DESC TABLE {table_name}")
     metadata = cursor.fetchall()
+    column_names = [i[0] for i in cursor.description]
     cursor.close()
-    return metadata
+    return metadata, column_names
 
-# Function to validate schema based on multiple column indices
-def validate_schema(mapping_df, metadata, column_indices):
+# Function to validate schema based on column indices from both mapping document and metadata
+def validate_schema(mapping_df, metadata, mapping_indices, metadata_indices):
     validation_results = []
     for index, row in mapping_df.iterrows():
-        for column_index in column_indices:
-            expected_value = row.iloc[column_index]
+        for map_idx, meta_idx in zip(mapping_indices, metadata_indices):
+            expected_value = row.iloc[map_idx]
             try:
-                actual_value = metadata[index][column_index]
+                actual_value = metadata[index][meta_idx]
                 match = (expected_value == actual_value)
             except IndexError:
                 actual_value = "Index out of range"
                 match = False
-
             validation_results.append({
                 'row_index': index,
-                'column_index': column_index,
+                'mapping_index': map_idx,
+                'metadata_index': meta_idx,
                 'expected_value': expected_value,
                 'actual_value': actual_value,
                 'match': match
@@ -61,6 +63,9 @@ def main():
         'table': st.text_input('Snowflake Table Name')
     }
 
+    if st.button('connect'):
+        conn = connect_snowflake(config)
+
     # Upload mapping document
     uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
     
@@ -68,34 +73,28 @@ def main():
         mapping_df = pd.read_csv(uploaded_file)
         st.write("Mapping Document:")
         st.write(mapping_df)
-
         if st.button('Fetch Metadata'):
             conn = connect_snowflake(config)
-            metadata = get_snowflake_metadata(conn, config['table'])
-            
-            # Show metadata in a table without specifying column names
-            metadata_df = pd.DataFrame(metadata)
+            metadata, column_names = get_snowflake_metadata(conn, config['table'])           
+            metadata_df = pd.DataFrame(metadata, columns=column_names)
             st.write("Snowflake Table Metadata:")
-            st.write(metadata_df)
-            
-            # Store metadata and mapping_df in session state
+            st.write(metadata_df)                        
             st.session_state['metadata'] = metadata
-            st.session_state['mapping_df'] = mapping_df
-            
+            st.session_state['column_names'] = column_names
+            st.session_state['mapping_df'] = mapping_df           
             conn.close()
-
     if 'metadata' in st.session_state and 'mapping_df' in st.session_state:
         metadata = st.session_state['metadata']
-        mapping_df = st.session_state['mapping_df']
-        
-        # Get column indices for validation
-        column_indices_input = st.text_input('Enter column indices for validation (comma-separated)', '0')
-        column_indices = list(map(int, column_indices_input.split(',')))
-
+        column_names = st.session_state['column_names']
+        mapping_df = st.session_state['mapping_df']        
+        # Get column indices for validation from both mapping document and metadata
+        mapping_indices_input = st.text_input('Enter column indices for validation from the mapping document (comma-separated)', '0')
+        metadata_indices_input = st.text_input('Enter column indices for validation from the metadata (comma-separated)', '0')        
+        mapping_indices = list(map(int, mapping_indices_input.split(',')))
+        metadata_indices = list(map(int, metadata_indices_input.split(',')))
         if st.button('Validate Schema'):
-            validation_results = validate_schema(mapping_df, metadata, column_indices)
+            validation_results = validate_schema(mapping_df, metadata, mapping_indices, metadata_indices)
             validation_df = pd.DataFrame(validation_results)
-
             st.write("Validation Results:")
             st.write(validation_df)
 
