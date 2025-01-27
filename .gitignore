@@ -1,1 +1,14 @@
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables
 credentials.env
+.env
+
+# Streamlit cache
+.streamlit/
+
+# Ignore OS-specific files
+.DS_Store
+thumbs.db
