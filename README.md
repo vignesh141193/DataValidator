@@ -1,6 +1,6 @@
 # QuickSchemaCheck
 
-QuickSchemaCheck is a Streamlit application for connecting to a Snowflake database and validating table schemas based on a mapping document. This script uses the `streamlit`, `snowflake.connector`, and `pandas` libraries.
+QuickSchemaCheck is a Streamlit application for connecting to a mapping doc/legacy database and cloud database and validating table schemas. This script uses the `streamlit`, `snowflake.connector`,'pyodc' and `pandas` libraries.
 
 ## Features
 
