@@ -146,41 +146,31 @@ def get_snowflake_data(snowflake_conn, snow_table_name):
         st.error(f"Error fetching data: {str(e)}")
         return None
     
+
 def normalize_value(value):
-    replacements = {
-        'Yes': 'Y',
-        'No': 'N',
-        'True': '1',
-        'False': '0',
-        'None': None,
-        '': None,
-        '0.0': 0,
-        '1.0': 1,
-        'NaN': None,
-        'nan': None,
-        'N/A': None,
-        'n/a': None,
-        'undefined': None,
-        'Infinity': float('inf'),
-        '-Infinity': float('-inf')
+    normalization_dict = {
+        "no": "n",
+        "yes": "y",
+        "true": "1",
+        "false": "0",
+        "numeric": "number"
     }
-    if isinstance(value, str):
-        value = value.strip().lower()
-        for key, replacement in replacements.items():
-            if value == key.lower():
-                return replacement
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
+    value_str = str(value).lower()
+    normalized_value = normalization_dict.get(value_str, value_str)
+    return normalized_value
+
+def strip_precision(data_type):
+        return data_type.split('(')[0] if '(' in data_type else data_type
+
 # Function to validate schema based on column indices from both mapping document and metadata
+
 def map_validate_schema(mapping_df, snowflake_metadata, mapping_indices, snowflake_metadata_indices):
     validation_results = []
     for index, row in mapping_df.iterrows():
         for map_idx, meta_idx in zip(mapping_indices, snowflake_metadata_indices):
-            expected_value = row.iloc[map_idx]
+            expected_value = normalize_value(strip_precision(row.iloc[map_idx]))
             try:
-                actual_value = snowflake_metadata[index][meta_idx]
-                expected_value = normalize_value(expected_value)
-                actual_value = normalize_value(actual_value)
+                actual_value = normalize_value(strip_precision(snowflake_metadata[index][meta_idx]))
                 match = (expected_value == actual_value)
             except IndexError:
                 actual_value = "Index out of range"
@@ -200,9 +190,9 @@ def meta_validate_schema(mssql_metadata, snowflake_metadata, mssql_metadata_indi
     validation_results = []
     for index, row in enumerate(mssql_metadata):
         for src_idx, tgt_idx in zip(mssql_metadata_indices, snowflake_metadata_indices):
-            expected_value = normalize_value(row[src_idx])
+            expected_value = normalize_value(strip_precision(row[src_idx]))
             try:
-                actual_value = normalize_value(snowflake_metadata[index][tgt_idx])
+                actual_value = normalize_value(strip_precision(snowflake_metadata[index][tgt_idx]))
                 match = (expected_value == actual_value)
             except IndexError:
                 actual_value = "Index out of range"
@@ -224,8 +214,8 @@ def validate_data(source_data, target_data, source_column_names, target_column_n
         for src_col, tgt_col in zip(source_column_names, target_column_names):
             src_idx = source_column_names.index(src_col)
             tgt_idx = target_column_names.index(tgt_col)
-            expected_value = src_row[src_idx]
-            actual_value = tgt_row[tgt_idx]
+            expected_value = normalize_value(strip_precision(src_row[src_idx]))
+            actual_value = normalize_value(strip_precision(tgt_row[tgt_idx]))
             match = (expected_value == actual_value)
             validation_results.append({
                 'source_column': src_col,
@@ -235,6 +225,7 @@ def validate_data(source_data, target_data, source_column_names, target_column_n
                 'match': match
             })
     return validation_results
+
 
 # Streamlit app
 def main():
@@ -254,6 +245,7 @@ def main():
             Mssql_Connection_type = st.radio("Connection Type", ('New', 'Existing'), key='mssql_connection_type')
             if Mssql_Connection_type == 'New':
                 with st.sidebar:
+                    st.header("MSSQL Connection Details")
                     config = {
                         'driver' : '{ODBC Driver 17 for SQL Server}',
                         'server': st.text_input('MSSQL Server', key='mssql_server'),
@@ -292,6 +284,7 @@ def main():
             Connection_type = st.radio("Connection Type", ('New', 'Existing'))
             if Connection_type == 'New':
                 with st.sidebar:
+                    st.header("Snowflake Connection Details")
                     config = {
                         'account': st.text_input('Snowflake Account', key='snowflake_account'),
                         'user': st.text_input('Snowflake User', key='snowflake_user'),
@@ -307,15 +300,13 @@ def main():
                     if snowflake_conn:
                         st.session_state['snowflake_conn'] = snowflake_conn
             elif Connection_type == 'Existing':
-                st.write("Connecting using saved connection details")
                 snowflake_conn = connect_snowflake()
                 if snowflake_conn:
                     st.session_state['snowflake_conn'] = snowflake_conn
     # Validation Type
     validation_type = st.radio("Select Validation Type", ('Schema Validation', 'Data Validation'))
     if validation_type == 'Schema Validation':
-        if 'mssql_conn' in  st.session_state and st.session_state['mssql_connection_success'] :
-            if 'mssql_conn' in st.session_state:
+        if 'mssql_conn' in st.session_state and st.session_state['mssql_connection_success']:
                 mssql_conn = st.session_state['mssql_conn']
                 try:
                     cursor = mssql_conn.cursor()
@@ -325,23 +316,23 @@ def main():
                     mssql_table_name = st.selectbox('Select MSSQL Table', table_names)
                 except Exception as e:
                     st.error(f"Error fetching table names: {str(e)}")
-            if st.button('Fetch Metadata from MS SQL Server', key='fetch_metadata_mssql'):
-                mssql_conn = st.session_state['mssql_conn']
-                if mssql_conn is not None:
-                    try:
-                        mssql_metadata, mssql_column_names = get_mssql_metadata(mssql_conn, mssql_table_name)
-                        if mssql_metadata:
-                            mssql_metadata_df = pd.DataFrame(mssql_metadata, columns=mssql_column_names)
-                            st.write(f"The column count in mssql Metadata: {len(mssql_metadata_df)}")
-                            st.write("MS SQL Server Table Metadata:")
-                            st.dataframe(mssql_metadata_df)
-                            st.session_state['mssql_metadata'] = mssql_metadata
-                            st.session_state['mssql_column_names'] = mssql_column_names
-                    except Exception as e:
-                        st.error(f"Error fetching metadata: {str(e)}")
+                    if st.button('Fetch Metadata from MS SQL Server', key='fetch_metadata_mssql'):
+                        mssql_conn = st.session_state['mssql_conn']
+                        if mssql_conn is not None:
+                                try:
+                                    mssql_metadata, mssql_column_names = get_mssql_metadata(mssql_conn, mssql_table_name)
+                                    if mssql_metadata:
+                                        mssql_metadata_df = pd.DataFrame(mssql_metadata, columns=mssql_column_names)
+                                        st.write(f"The column count in mssql Metadata: {len(mssql_metadata_df)}")
+                                        st.write("MS SQL Server Table Metadata:")
+                                        st.dataframe(mssql_metadata_df)
+                                        st.session_state['mssql_metadata'] = mssql_metadata
+                                        st.session_state['mssql_column_names'] = mssql_column_names
+                                except Exception as e:
+                                    st.error(f"Error fetching metadata: {str(e)}")
                 
         if 'snowflake_conn'in st.session_state and st.session_state['snowflake_connection_success']:
-            try:
+            try:    
                 snowflake_conn = st.session_state['snowflake_conn']
                 cursor = snowflake_conn.cursor()
                 cursor.execute("SHOW TABLES")
@@ -363,7 +354,7 @@ def main():
                                 st.session_state['snowflake_metadata'] = snowflake_metadata
                                 st.session_state['snow_column_names'] = snow_column_names
                         except Exception as e:
-                            st.error(f"Error fetching metadata: {str(e)}")
+                                st.error(f"Error fetching metadata: {str(e)}")
         if 'snowflake_conn' in st.session_state and 'snowflake_metadata' in st.session_state:
             snowflake_conn = st.session_state['snowflake_conn']
             snowflake_metadata = st.session_state['snowflake_metadata']
